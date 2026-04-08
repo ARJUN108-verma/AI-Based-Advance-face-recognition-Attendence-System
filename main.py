@@ -1,0 +1,168 @@
+import os
+import pickle
+import numpy as np
+import cv2
+import face_recognition
+import cvzone
+import numpy as np
+from datetime import datetime
+from supabase import create_client, Client
+
+# Supabase Configuration
+SUPABASE_URL = "https://auqxgnhnolllmubcngtt.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF1cXhnbmhub2xsbG11YmNuZ3R0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MjA2NTUzNiwiZXhwIjoyMDc3NjQxNTM2fQ.5xR_H-ijwflGV8VJ0MO8UdKDYKpAgMVkSHT0ZuaVbMA"
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+print("✅ Supabase connected successfully (EncodeGenerator)")
+
+cap = cv2.VideoCapture(0)
+cap.set(3, 640)
+cap.set(4, 480)
+
+imgBackground = cv2.imread('Resources/background.png')
+
+# Importing the mode images into a list
+folderModePath = 'Resources/Modes'
+modePathList = os.listdir(folderModePath)
+imgModeList = []
+for path in modePathList:
+    imgModeList.append(cv2.imread(os.path.join(folderModePath, path)))
+# print(len(imgModeList))
+
+# Load the encoding file
+print("Loading Encode File ...")
+file = open('EncodeFile.p', 'rb')
+encodeListKnownWithIds = pickle.load(file)
+file.close()
+encodeListKnown, studentIds = encodeListKnownWithIds
+# print(studentIds)
+print("Encode File Loaded")
+
+modeType = 0
+counter = 0
+id = -1
+imgStudent = []
+
+while True:
+    success, img = cap.read()
+
+    # Resize for faster processing
+    imgS = cv2.resize(img, (0, 0), fx=0.25, fy=0.25)
+
+    # Convert to RGB (face_recognition expects RGB)
+    imgS = cv2.cvtColor(imgS, cv2.COLOR_BGR2RGB)
+
+    # Ensure contiguous memory and correct dtype
+    imgS = np.array(imgS, dtype=np.uint8, order='C')
+    imgS.setflags(write=True)
+
+    # Debug info
+    print(f"imgS type: {type(imgS)}, dtype: {imgS.dtype}, shape: {imgS.shape}, contiguous: {imgS.flags['C_CONTIGUOUS']}")
+
+    # --- face detection ---
+    faceCurFrame = face_recognition.face_locations(imgS, model="hog")
+    encodeCurFrame = face_recognition.face_encodings(imgS, faceCurFrame)
+
+    imgBackground[162:162 + 480, 55:55 + 640] = img
+    imgBackground[44:44 + 633, 808:808 + 414] = imgModeList[modeType]
+
+    if faceCurFrame:
+        for encodeFace, faceLoc in zip(encodeCurFrame, faceCurFrame):
+            matches = face_recognition.compare_faces(encodeListKnown, encodeFace)
+            faceDis = face_recognition.face_distance(encodeListKnown, encodeFace)
+            # print("matches", matches)
+            # print("faceDis", faceDis)
+
+            matchIndex = np.argmin(faceDis)
+            # print("Match Index", matchIndex)
+
+            if matches[matchIndex]:
+                # print("Known Face Detected")
+                # print(studentIds[matchIndex])
+                y1, x2, y2, x1 = faceLoc
+                y1, x2, y2, x1 = y1 * 4, x2 * 4, y2 * 4, x1 * 4
+                bbox = 55 + x1, 162 + y1, x2 - x1, y2 - y1
+                imgBackground = cvzone.cornerRect(imgBackground, bbox, rt=0)
+                id = studentIds[matchIndex]
+                if counter == 0:
+                    cvzone.putTextRect(imgBackground, "Loading", (275, 400))
+                    cv2.imshow("Face Attendance", imgBackground)
+                    cv2.waitKey(1)
+                    counter = 1
+                    modeType = 1
+
+        if counter != 0:
+
+            if counter == 1:
+                # Get the Data
+                studentInfo = supabase.table("Students").select("*").eq("student_id", id).execute()
+                data = studentInfo.data
+
+                print(studentInfo)
+                # Get the Image from the storage
+                blob = supabase.storage.from_("student-images").download(f'{id}.png')
+                array = np.frombuffer(blob, np.uint8)
+                imgStudent = cv2.imdecode(array, cv2.COLOR_BGRA2BGR)
+                # Update data of attendance
+                datetimeObject = datetime.fromisoformat(studentInfo.data[0]['last_attendance_time'])
+                secondsElapsed = (datetime.now() - datetimeObject).total_seconds()
+                print(secondsElapsed)
+                
+                if secondsElapsed > 30:
+                    new_total = studentInfo.data[0]['total_attendance'] + 1
+
+            # Update the Supabase table instead of Firebase
+                    response = supabase.table("Students").update({
+                    "total_attendance": new_total,
+                    "last_attendance_time": datetime.now().isoformat()
+                    }).eq("id", studentInfo.data[0]['id']).execute()
+
+                    print("✅ Attendance updated successfully in Supabase:", response)
+                else:
+                    modeType = 3
+                    counter = 0
+                    imgBackground[44:44 + 633, 808:808 + 414] = imgModeList[modeType]
+            
+            if modeType != 3:
+
+                if 10 < counter < 20:
+                    modeType = 2
+
+                imgBackground[44:44 + 633, 808:808 + 414] = imgModeList[modeType]
+
+                if counter <= 10:
+                    cv2.putText(imgBackground,str(studentInfo.data[0]['total_attendance']),(861, 125),
+                                cv2.FONT_HERSHEY_COMPLEX,1,(255, 255, 255),1)
+
+                    cv2.putText(imgBackground, str(studentInfo.data[0]['major']), (1006, 550),
+                                cv2.FONT_HERSHEY_COMPLEX, 0.5, (255, 255, 255), 1)
+                    cv2.putText(imgBackground, str(id), (1006, 493),
+                                cv2.FONT_HERSHEY_COMPLEX, 0.5, (255, 255, 255), 1)
+                    cv2.putText(imgBackground, str(studentInfo.data[0]['standing']), (910, 625),
+                                cv2.FONT_HERSHEY_COMPLEX, 0.6, (100, 100, 100), 1)
+                    cv2.putText(imgBackground, str(studentInfo.data[0]['year']), (1025, 625),
+                                cv2.FONT_HERSHEY_COMPLEX, 0.6, (100, 100, 100), 1)
+                    cv2.putText(imgBackground, str(studentInfo.data[0]['starting_year']), (1125, 625),
+                                cv2.FONT_HERSHEY_COMPLEX, 0.6, (100, 100, 100), 1)
+
+                    (w, h), _ = cv2.getTextSize(studentInfo.data[0]['name'], cv2.FONT_HERSHEY_COMPLEX, 1, 1)
+                    offset = (414 - w) // 2
+                    cv2.putText(imgBackground, str(studentInfo.data[0]['name']), (808 + offset, 445),
+                                cv2.FONT_HERSHEY_COMPLEX, 1, (50, 50, 50), 1)
+                    imgStudent = cv2.resize(imgStudent, (216, 216))
+                    imgBackground[175:175 + 216, 909:909 + 216] = imgStudent
+
+                counter += 1
+
+                if counter >= 20:
+                    counter = 0
+                    modeType = 0
+                    studentInfo = []
+                    imgStudent = []
+                    imgBackground[44:44 + 633, 808:808 + 414] = imgModeList[modeType]
+    else:
+        modeType = 0
+        counter = 0
+    # cv2.imshow("Webcam", img)
+    cv2.imshow("Face Attendance", imgBackground)
+    cv2.waitKey(1)

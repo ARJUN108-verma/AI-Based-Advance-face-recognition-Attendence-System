@@ -1,0 +1,48 @@
+from supabase import create_client, Client
+
+# 🔑 Replace these with your own Supabase credentials
+SUPABASE_URL = "https://auqxgnhnolllmubcngtt.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF1cXhnbmhub2xsbG11YmNuZ3R0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MjA2NTUzNiwiZXhwIjoyMDc3NjQxNTM2fQ.5xR_H-ijwflGV8VJ0MO8UdKDYKpAgMVkSHT0ZuaVbMA"  # or anon key if testing
+
+# ✅ Initialize Supabase client
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+print("✅ Supabase connected successfully (AddDatatoDatabase)")
+
+# 🧠 Student data dictionary
+data = {
+    "6003": {
+        "name": "ARJUN KUMAR VERMA",
+        "major": "Artificial Intelligence Engineer",
+        "starting_year": 2023,
+        "total_attendance": 7,
+        "standing": "G",
+        "year": 3,
+        "last_attendance_time": "2022-12-11 00:54:34"
+    },
+    "6004": {
+        "name": "Nitesh Prajapati",
+        "major": "Software Engineer",
+        "starting_year": 2023,
+        "total_attendance": 4,
+        "standing": "B",
+        "year": 1,
+        "last_attendance_time": "2022-12-11 00:54:34"
+    },
+    "6005": {
+        "name": "Ratnesh Tripathi",
+        "major": "Data Analyst",
+        "starting_year": 2023,
+        "total_attendance": 7,
+        "standing": "G",
+        "year": 2,
+        "last_attendance_time": "2022-12-11 00:54:34"
+    }
+}
+
+# 📤 Upload data to Supabase
+for student_id, info in data.items():
+    record = {"student_id": student_id, **info}
+    response = supabase.table("Students").insert(record).execute()
+    print(f"📤 Inserted: {student_id} → {response}")
+
+print("✅ All student data uploaded successfully to Supabase.")
